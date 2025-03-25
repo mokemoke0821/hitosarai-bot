@@ -1,0 +1,19 @@
+# 依存関係
+/node_modules
+
+# ビルド出力
+/dist
+
+# 環境変数
+.env
+
+# ログファイル
+/logs/*
+
+# エディタの設定ファイル
+.vscode/
+.idea/
+
+# OS特有のファイル
+.DS_Store
+Thumbs.db
