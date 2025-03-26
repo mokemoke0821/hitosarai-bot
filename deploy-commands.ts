@@ -16,12 +16,21 @@ async function deployCommands() {
       throw new Error('CLIENT_IDが設定されていません。.envファイルを確認してください。');
     }
 
-    // 常にグローバルコマンドとして登録する
-    // (サーバー特定のコマンドには追加の権限が必要なため)
-    let deploymentTarget = Routes.applicationCommands(process.env.CLIENT_ID);
-    let targetType = 'グローバル';
+    // ギルド（サーバー）専用コマンドとして登録
+    // config.guildIdが設定されている場合はそのサーバーに登録
+    // それ以外の場合はグローバルコマンドとして登録
+    let deploymentTarget;
+    let targetType;
     
-    logger.info('グローバルコマンドとして登録します（反映に最大1時間かかる場合があります）');
+    if (config.guildId) {
+      deploymentTarget = Routes.applicationGuildCommands(process.env.CLIENT_ID, config.guildId);
+      targetType = `ギルド(${config.guildId})`;
+      logger.info(`ギルド専用コマンドとして登録します (即時反映)`);
+    } else {
+      deploymentTarget = Routes.applicationCommands(process.env.CLIENT_ID);
+      targetType = 'グローバル';
+      logger.info('グローバルコマンドとして登録します（反映に最大1時間かかる場合があります）');
+    }
 
     // コマンドファイルの読み込み
     const commands = [];
