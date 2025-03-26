@@ -1,19 +1,15 @@
-import { SlashCommandBuilder, PermissionFlagsBits, ChatInputCommandInteraction } from 'discord.js';
+import { SlashCommandBuilder, PermissionFlagsBits, ChatInputCommandInteraction, VoiceChannel } from 'discord.js';
 import { logger } from '../../utils/logger';
-import { checkBotPermissions, hasAdminPermissions } from '../../utils/permissionChecker';
+import { checkBotPermissions } from '../../utils/permissionChecker';
 import { moveHistory } from '../../utils/moveHistory';
 
 export const data = new SlashCommandBuilder()
   .setName('undolastmove')
   .setDescription('最後の移動操作を元に戻します')
-  .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers | PermissionFlagsBits.Administrator);
+  .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers); // 管理者権限なしで使用可能
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  // 権限チェック
-  if (!hasAdminPermissions(interaction.member)) {
-    await interaction.reply({ content: '⚠️ このコマンドを実行するには管理者権限が必要です。', ephemeral: true });
-    return;
-  }
+  // 管理者権限チェックを削除
 
   const permissionCheck = checkBotPermissions(interaction.guild);
   if (!permissionCheck.hasPermissions) {
@@ -24,65 +20,59 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return;
   }
 
-  // 最後の移動操作を取得
-  const lastMoveRecords = moveHistory.getLastSessionRecords();
-  if (!lastMoveRecords || lastMoveRecords.length === 0) {
-    await interaction.reply({ 
-      content: '⚠️ 元に戻せる移動操作が見つかりません。',
-      ephemeral: true 
-    });
-    return;
-  }
-
   try {
     await interaction.deferReply();
 
-    // 移動するメンバーの数をカウント
-    let movedCount = 0;
+    // 最後の移動セッションを取得
+    const records = moveHistory.getLastSessionRecords();
+    
+    if (!records || records.length === 0) {
+      await interaction.editReply('⚠️ 元に戻せる移動履歴がありません。');
+      return;
+    }
+    
+    // 移動を元に戻す
+    let restoredCount = 0;
     let failedCount = 0;
     
-    // 各メンバーを元のチャンネルに戻す
-    for (const record of lastMoveRecords) {
+    // 逆順で処理（最後に移動したメンバーから順に戻す）
+    for (let i = records.length - 1; i >= 0; i--) {
+      const record = records[i];
+      
       try {
         // メンバーを取得
         const member = await interaction.guild?.members.fetch(record.userId);
         
-        // 現在のメンバーが移動先チャンネルにいるかチェック
-        if (!member || member.voice.channelId !== record.targetChannelId) {
-          logger.warn(`メンバー ${record.username} は移動先チャンネルにいないため、元に戻せません`);
-          failedCount++;
-          continue;
+        if (member && member.voice.channelId) {
+          // メンバーを元のチャンネルに戻す
+          await member.voice.setChannel(record.sourceChannelId);
+          restoredCount++;
+          
+          // ログ記録
+          logger.logVoiceMovement(
+            `メンバー ${record.username} を ${record.targetChannelName} から元の ${record.sourceChannelName} に戻しました`
+          );
+          
+          // API制限を避けるための遅延
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
-
-        // メンバーを元のチャンネルに戻す
-        await member.voice.setChannel(record.sourceChannelId);
-        
-        // ログ記録
-        logger.logVoiceMovement(
-          `メンバー ${record.username} を ${record.targetChannelName} から元の ${record.sourceChannelName} に戻しました`
-        );
-        
-        movedCount++;
-        
-        // API制限を避けるための遅延
-        await new Promise(resolve => setTimeout(resolve, 300));
       } catch (error) {
         logger.error(`メンバー ${record.username} の元に戻す操作に失敗しました:`, error);
         failedCount++;
       }
     }
 
-    // 移動履歴をクリア
+    // 履歴をクリア
     moveHistory.clearLastSession();
-
+    
     // 結果を返信
-    if (movedCount > 0) {
+    if (restoredCount > 0) {
       await interaction.editReply(
-        `✅ ${movedCount}人のメンバーを元のチャンネルに戻しました。` + 
-        (failedCount > 0 ? `\n⚠️ ${failedCount}人の元に戻す操作に失敗しました。` : '')
+        `✅ ${restoredCount}人のメンバーを元のチャンネルに戻しました。` +
+        (failedCount > 0 ? `\n⚠️ ${failedCount}人の操作に失敗しました。` : '')
       );
     } else {
-      await interaction.editReply('⚠️ メンバーを元に戻す操作に失敗しました。');
+      await interaction.editReply('⚠️ 元に戻せるメンバーがいませんでした。');
     }
   } catch (error) {
     logger.error('undolastmove コマンドの実行中にエラーが発生しました:', error);

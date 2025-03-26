@@ -1,11 +1,11 @@
 import { SlashCommandBuilder, PermissionFlagsBits, ChatInputCommandInteraction, VoiceChannel } from 'discord.js';
 import { logger } from '../../utils/logger';
-import { checkBotPermissions, hasAdminPermissions } from '../../utils/permissionChecker';
+import { checkBotPermissions } from '../../utils/permissionChecker';
 import { moveHistory } from '../../utils/moveHistory';
 
 export const data = new SlashCommandBuilder()
   .setName('movefrom')
-  .setDescription('特定のボイスチャンネルからメンバーを別のチャンネルに移動します')
+  .setDescription('指定のボイスチャンネルから別のチャンネルにメンバーを移動します')
   .addChannelOption(option => 
     option.setName('from')
       .setDescription('移動元のボイスチャンネル')
@@ -16,14 +16,10 @@ export const data = new SlashCommandBuilder()
       .setDescription('移動先のボイスチャンネル')
       .setRequired(true)
   )
-  .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers | PermissionFlagsBits.Administrator);
+  .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers); // 管理者権限なしで使用可能
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  // 権限チェック
-  if (!hasAdminPermissions(interaction.member)) {
-    await interaction.reply({ content: '⚠️ このコマンドを実行するには管理者権限が必要です。', ephemeral: true });
-    return;
-  }
+  // 管理者権限チェックを削除
 
   const permissionCheck = checkBotPermissions(interaction.guild);
   if (!permissionCheck.hasPermissions) {
@@ -38,26 +34,19 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const targetChannel = interaction.options.getChannel('to');
   
   // チャンネルの種類をチェック
-  if (!sourceChannel || sourceChannel.type !== 2) { // 2 = GuildVoice
+  if (!sourceChannel || sourceChannel.type !== 2 || !targetChannel || targetChannel.type !== 2) {
     await interaction.reply({ 
-      content: '⚠️ 指定された移動元チャンネルがボイスチャンネルではありません。',
+      content: '⚠️ 指定されたチャンネルがボイスチャンネルではありません。',
       ephemeral: true 
     });
     return;
   }
 
-  if (!targetChannel || targetChannel.type !== 2) { // 2 = GuildVoice
-    await interaction.reply({ 
-      content: '⚠️ 指定された移動先チャンネルがボイスチャンネルではありません。',
-      ephemeral: true 
-    });
-    return;
-  }
-
+  // 同じチャンネルを選択した場合はエラー
   if (sourceChannel.id === targetChannel.id) {
-    await interaction.reply({ 
-      content: '⚠️ 移動元と移動先のチャンネルが同じです。',
-      ephemeral: true 
+    await interaction.reply({
+      content: '⚠️ 移動元と移動先が同じチャンネルです。',
+      ephemeral: true
     });
     return;
   }
@@ -65,25 +54,24 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   try {
     await interaction.deferReply();
 
+    // ソースチャンネルを取得
+    const voiceChannel = interaction.guild?.channels.cache.get(sourceChannel.id) as VoiceChannel;
+    
+    if (!voiceChannel || !voiceChannel.members || voiceChannel.members.size === 0) {
+      await interaction.editReply('⚠️ 移動元のチャンネルにメンバーがいません。');
+      return;
+    }
+
     // 新しい移動セッションを開始
     const sessionId = moveHistory.startNewSession(
       interaction.user.id,
       interaction.user.tag
     );
 
-    // 移動するメンバーの数をカウント
+    // メンバーを移動
     let movedCount = 0;
     let failedCount = 0;
     
-    // チャンネル内のメンバーを取得
-    const voiceChannel = sourceChannel as VoiceChannel;
-    
-    if (voiceChannel.members.size === 0) {
-      await interaction.editReply(`⚠️ ${voiceChannel.name} には移動するメンバーがいません。`);
-      return;
-    }
-
-    // メンバーを移動
     for (const [memberId, member] of voiceChannel.members) {
       try {
         // 移動前の情報を保存
@@ -122,11 +110,11 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     // 結果を返信
     if (movedCount > 0) {
       await interaction.editReply(
-        `✅ ${movedCount}人のメンバーを ${voiceChannel.name} から ${targetChannel.name} に移動しました。` + 
+        `✅ ${movedCount}人のメンバーを ${voiceChannel.name} から ${targetChannel.name} に移動しました。` +
         (failedCount > 0 ? `\n⚠️ ${failedCount}人の移動に失敗しました。` : '')
       );
     } else {
-      await interaction.editReply('⚠️ メンバーの移動に失敗しました。');
+      await interaction.editReply('⚠️ 移動するメンバーが見つかりませんでした。');
     }
   } catch (error) {
     logger.error('movefrom コマンドの実行中にエラーが発生しました:', error);

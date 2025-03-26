@@ -1,29 +1,20 @@
 import { SlashCommandBuilder, PermissionFlagsBits, ChatInputCommandInteraction, VoiceChannel } from 'discord.js';
 import { logger } from '../../utils/logger';
-import { checkBotPermissions, hasAdminPermissions } from '../../utils/permissionChecker';
+import { checkBotPermissions } from '../../utils/permissionChecker';
 import { moveHistory } from '../../utils/moveHistory';
 
 export const data = new SlashCommandBuilder()
   .setName('movebyname')
-  .setDescription('チャンネル名で指定したボイスチャンネルにメンバーを移動します')
+  .setDescription('指定の名前を含むボイスチャンネルにユーザーを移動します')
   .addStringOption(option => 
     option.setName('channelname')
-      .setDescription('移動先ボイスチャンネルの名前（部分一致可）')
+      .setDescription('検索するチャンネル名')
       .setRequired(true)
   )
-  .addChannelOption(option => 
-    option.setName('from')
-      .setDescription('移動元のボイスチャンネル（指定しない場合は全チャンネルから）')
-      .setRequired(false)
-  )
-  .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers | PermissionFlagsBits.Administrator);
+  .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers); // 管理者権限なしで使用可能
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  // 権限チェック
-  if (!hasAdminPermissions(interaction.member)) {
-    await interaction.reply({ content: '⚠️ このコマンドを実行するには管理者権限が必要です。', ephemeral: true });
-    return;
-  }
+  // 管理者権限チェックを削除
 
   const permissionCheck = checkBotPermissions(interaction.guild);
   if (!permissionCheck.hasPermissions) {
@@ -35,38 +26,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const channelName = interaction.options.getString('channelname');
-  const fromChannel = interaction.options.getChannel('from');
   
-  // 移動先チャンネルの検索
-  const targetChannels = interaction.guild?.channels.cache.filter(
-    channel => channel.type === 2 && channel.name.toLowerCase().includes(channelName.toLowerCase())
-  );
-
-  if (!targetChannels || targetChannels.size === 0) {
+  if (!channelName) {
     await interaction.reply({ 
-      content: `⚠️ 名前に「${channelName}」を含むボイスチャンネルが見つかりません。`,
-      ephemeral: true 
-    });
-    return;
-  }
-
-  // 複数のチャンネルが見つかった場合
-  if (targetChannels.size > 1) {
-    const channelList = targetChannels.map(ch => `・${ch.name}`).join('\n');
-    await interaction.reply({ 
-      content: `⚠️ 複数のチャンネルが見つかりました。より具体的な名前を指定してください：\n${channelList}`,
-      ephemeral: true 
-    });
-    return;
-  }
-
-  // 見つかったチャンネル（1つだけ）
-  const targetChannel = targetChannels.first() as VoiceChannel;
-
-  // 移動元チャンネルのチェック
-  if (fromChannel && fromChannel.type !== 2) {
-    await interaction.reply({ 
-      content: '⚠️ 指定された移動元チャンネルがボイスチャンネルではありません。',
+      content: '⚠️ チャンネル名を入力してください。',
       ephemeral: true 
     });
     return;
@@ -74,6 +37,16 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   try {
     await interaction.deferReply();
+
+    // チャンネル名で検索
+    const targetChannel = interaction.guild?.channels.cache.find(
+      channel => channel.type === 2 && channel.name.toLowerCase().includes(channelName.toLowerCase())
+    ) as VoiceChannel;
+
+    if (!targetChannel) {
+      await interaction.editReply(`⚠️ "${channelName}" を含む名前のボイスチャンネルが見つかりません。`);
+      return;
+    }
 
     // 新しい移動セッションを開始
     const sessionId = moveHistory.startNewSession(
@@ -85,25 +58,18 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     let movedCount = 0;
     let failedCount = 0;
     
-    // 移動元チャンネルの決定
-    let sourceChannels;
-    if (fromChannel) {
-      // 特定のチャンネルから移動
-      sourceChannels = new Map([[fromChannel.id, fromChannel]]);
-    } else {
-      // すべてのチャンネルから移動
-      sourceChannels = interaction.guild?.channels.cache.filter(
-        channel => channel.type === 2 && channel.id !== targetChannel.id
-      );
-    }
+    // 全てのボイスチャンネルを取得 (ターゲットチャンネル以外)
+    const voiceChannels = interaction.guild?.channels.cache.filter(
+      channel => channel.type === 2 && channel.id !== targetChannel.id
+    );
 
-    if (!sourceChannels || sourceChannels.size === 0) {
+    if (!voiceChannels || voiceChannels.size === 0) {
       await interaction.editReply('⚠️ 移動元となるボイスチャンネルが見つかりません。');
       return;
     }
 
     // 各チャンネルのメンバーを移動
-    for (const [_, channel] of sourceChannels) {
+    for (const [_, channel] of voiceChannels) {
       const voiceChannel = channel as VoiceChannel;
       
       for (const [memberId, member] of voiceChannel.members) {
@@ -145,7 +111,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     // 結果を返信
     if (movedCount > 0) {
       await interaction.editReply(
-        `✅ ${movedCount}人のメンバーを ${targetChannel.name} に移動しました。` + 
+        `✅ ${movedCount}人のメンバーを "${targetChannel.name}" チャンネルに移動しました。` +
         (failedCount > 0 ? `\n⚠️ ${failedCount}人の移動に失敗しました。` : '')
       );
     } else {
