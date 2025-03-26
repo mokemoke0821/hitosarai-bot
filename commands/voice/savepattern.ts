@@ -1,6 +1,6 @@
 import { SlashCommandBuilder, PermissionFlagsBits, ChatInputCommandInteraction, VoiceChannel } from 'discord.js';
 import { logger } from '../../utils/logger';
-import { checkBotPermissions, hasAdminPermissions } from '../../utils/permissionChecker';
+import { checkBotPermissions } from '../../utils/permissionChecker';
 import { patternManager } from '../../utils/patternManager';
 
 export const data = new SlashCommandBuilder()
@@ -21,14 +21,10 @@ export const data = new SlashCommandBuilder()
       .setDescription('移動先のボイスチャンネル')
       .setRequired(true)
   )
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+  .setDefaultMemberPermissions(PermissionFlagsBits.MoveMembers);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  // 権限チェック
-  if (!hasAdminPermissions(interaction.member)) {
-    await interaction.reply({ content: '⚠️ このコマンドを実行するには管理者権限が必要です。', ephemeral: true });
-    return;
-  }
+  // 管理者権限チェックを削除
 
   const permissionCheck = checkBotPermissions(interaction.guild);
   if (!permissionCheck.hasPermissions) {
